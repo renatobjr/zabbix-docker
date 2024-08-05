@@ -1,0 +1,4 @@
+ZBX_SERVER_HOST=zabbix-server
+HOSTNAME=zabbix-agent
+ZBX_PASSIVE_ALLOW=true
+ZBX_DEBUGLEVEL=4

@@ -1,0 +1,148 @@
+version: "3.7"
+
+# Networks confs
+networks:
+  zabbix-net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.27.0.0/16
+          gateway: 172.27.0.1
+
+services:
+  # Zabbix mysql confs
+  zabbix-database:
+    container_name: zabbix-database
+    image: mysql:8.0
+    ports:
+      - 3306:3306
+    volumes:
+      - ./mysql:/var/lib/mysql
+      - ./zbx_initdb:/docker-entrypoint-initdb.d
+    env_file:
+      - ./envs/env_mysql
+    networks:
+      zabbix-net:
+        ipv4_address: 172.27.0.2
+        aliases:
+          - zabbix-database
+
+  # Zabbix server confs
+  zabbix-server:
+    container_name: zabbix-server
+    image: zabbix/zabbix-server-mysql:ubuntu-6.0-latest
+    ports:
+      - 10051:10051
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ./zbx/usr/lib/zabbix/alertscripts:/usr/lib/zabbix/alertscripts:ro
+      - ./zbx/usr/lib/zabbix/externalscripts:/usr/lib/zabbix/externalscripts:ro
+      - ./zbx/var/lib/zabbix/export:/var/lib/zabbix/export:rw
+      - ./zbx/var/lib/zabbix/modules:/var/lib/zabbix/modules:ro
+      - ./zbx/var/lib/zabbix/enc:/var/lib/zabbix/enc:ro
+      - ./zbx/var/lib/zabbix/ssh_keys:/var/lib/zabbix/ssh_keys:ro
+      - ./zbx/var/lib/zabbix/mibs:/var/lib/zabbix/mibs:ro
+    env_file:
+      - ./envs/env_server
+    depends_on:
+      - zabbix-database
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 20000
+        hard: 40000
+    deploy:
+      resources:
+        limits:
+          cpus: "0.70"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    networks:
+      zabbix-net:
+        ipv4_address: 172.27.0.3
+        aliases:
+          - zabbix-server
+
+  # Zabbix frontend confs
+  zabbix-frontend:
+    container_name: zabbix-frontend
+    image: zabbix/zabbix-web-nginx-mysql:ubuntu-6.0-latest
+    ports:
+      - 80:8080
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ./zbx/etc/ssl/nginx:/etc/ssl/nginx:ro
+      - ./zbx/usr/share/zabbix/modules/:/usr/share/zabbix/modules/:ro
+    env_file:
+      - ./envs/env_frontend
+    links:
+      - zabbix-database
+    depends_on:
+      - zabbix-database
+    deploy:
+      resources:
+        limits:
+          cpus: "0.70"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      zabbix-net:
+        ipv4_address: 172.27.0.4
+        aliases:
+          - zabbix-frontend
+
+  # Zabbix agent
+  zabbix-agent:
+    container_name: zabbix-agent
+    image: zabbix/zabbix-agent2:ubuntu-6.0-latest
+    ports:
+      - 10050:10050
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ./zbx/etc/zabbix/zabbix_agentd.d:/etc/zabbix/zabbix_agentd.d:ro
+      - ./zbx/var/lib/zabbix/modules:/var/lib/zabbix/modules:ro
+      - ./zbx/var/lib/zabbix/enc:/var/lib/zabbix/enc:ro
+      - ./zbx/var/lib/zabbix/ssh_keys:/var/lib/zabbix/ssh_keys:ro
+    links:
+      - zabbix-server
+    env_file:
+      - ./envs/env_agent
+    networks:
+      zabbix-net:
+        ipv4_address: 172.27.0.5
+        aliases:
+          - zabbix-agent
+
+  # Grafana Zabbix Plugins
+  grafana:
+    container_name: grafana
+    image: grafana/grafana
+    ports:
+      - 3000:3000
+    env_file:
+      - ./envs/env_grafana
+    links:
+      - zabbix-database
+      - zabbix-server
+    depends_on:
+      - zabbix-database
+      - zabbix-server
+    networks:
+      zabbix-net:
+        ipv4_address: 172.27.0.6
+        aliases:
+          - grafana
